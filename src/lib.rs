@@ -129,7 +129,7 @@ async fn setup_veth_link(veth_config: &VethConfig) -> anyhow::Result<(Handle, Jo
         Ok((link_handle, join_handle, dev1, dev2))
 }
 
-fn add_veth_link(veth_config: &VethConfig) -> anyhow::Result<VethPair> {
+pub fn add_veth_link(veth_config: &VethConfig) -> anyhow::Result<VethPair> {
     let mut rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
 
     let (link_handle, join_handle, dev1, dev2) = rt.block_on(async {

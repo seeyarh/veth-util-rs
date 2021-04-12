@@ -50,6 +50,12 @@ pub struct VethConfig {
     dev2_ifname: String,
 }
 
+impl VethConfig {
+    pub fn new(dev1_ifname: String, dev2_ifname: String) -> Self {
+        Self {dev1_ifname, dev2_ifname}
+    }
+}
+
 impl Default for VethConfig {
     fn default() -> Self {
         Self {

@@ -13,11 +13,35 @@ pub struct VethPair {
     dev2: VethLink,
 }
 
+impl VethPair {
+    pub fn dev1(&self) -> &VethLink {
+        &self.dev1
+    }
+
+    pub fn dev2(&self) -> &VethLink {
+        &self.dev2
+    }
+}
+
 #[derive(Debug)]
 pub struct VethLink {
     ifname: String,
     index: u32,
     mac_addr: [u8; 6],
+}
+
+impl VethLink {
+    pub fn ifname(&self) -> &str {
+        &self.ifname
+    }
+
+    pub fn index(&self) -> u32 {
+        self.index
+    }
+
+    pub fn mac_addr(&self) -> &[u8; 6] {
+        &self.mac_addr
+    }
 }
 
 #[derive(Debug)]
@@ -130,7 +154,7 @@ async fn setup_veth_link(veth_config: &VethConfig) -> anyhow::Result<(Handle, Jo
 }
 
 pub fn add_veth_link(veth_config: &VethConfig) -> anyhow::Result<VethPair> {
-    let mut rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
+    let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
 
     let (link_handle, join_handle, dev1, dev2) = rt.block_on(async {
         setup_veth_link(veth_config).await
@@ -147,7 +171,12 @@ mod tests {
     fn test_default_config() {
         let veth_config = VethConfig::default();
         let pair = add_veth_link(&veth_config).expect("failed to create veth pair");
-        assert_eq!(pair.dev1.ifname, veth_config.dev1_ifname);
-        assert_eq!(pair.dev2.ifname, veth_config.dev2_ifname);
+        assert_eq!(pair.dev1().ifname(), veth_config.dev1_ifname);
+        assert_eq!(pair.dev2().ifname(), veth_config.dev2_ifname);
+
+        pair.dev1().index();
+        pair.dev2().index();
+        pair.dev1().mac_addr();
+        pair.dev2().mac_addr();
     }
 }

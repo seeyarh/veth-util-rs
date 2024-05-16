@@ -1,8 +1,9 @@
+#![allow(unused)]
+
 use futures::stream::TryStreamExt;
+use mac_address::mac_address_by_name;
 use rtnetlink::Handle;
 use tokio::task::JoinHandle;
-use mac_address::mac_address_by_name;
-
 
 #[derive(Debug)]
 pub struct VethPair {
@@ -52,7 +53,10 @@ pub struct VethConfig {
 
 impl VethConfig {
     pub fn new(dev1_ifname: String, dev2_ifname: String) -> Self {
-        Self {dev1_ifname, dev2_ifname}
+        Self {
+            dev1_ifname,
+            dev2_ifname,
+        }
     }
 }
 
@@ -67,9 +71,9 @@ impl Default for VethConfig {
 
 impl Drop for VethPair {
     fn drop(&mut self) {
-        self.rt.block_on(async {
-            delete_link(&self.link_handle, self.dev1.index).await
-        }).expect("failed to delete link");
+        self.rt
+            .block_on(async { delete_link(&self.link_handle, self.dev1.index).await })
+            .expect("failed to delete link");
     }
 }
 
@@ -81,7 +85,7 @@ async fn get_link_index(handle: &Handle, name: &str) -> anyhow::Result<u32> {
     Ok(handle
         .link()
         .get()
-        .set_name_filter(name.into())
+        .match_name(name.into())
         .execute()
         .try_next()
         .await?
@@ -94,79 +98,85 @@ async fn set_link_up(handle: &Handle, index: u32) -> anyhow::Result<()> {
     Ok(handle.link().set(index).up().execute().await?)
 }
 
-async fn setup_veth_link(veth_config: &VethConfig) -> anyhow::Result<(Handle, JoinHandle<()>, VethLink, VethLink)> {
-        let (connection, link_handle, _) = rtnetlink::new_connection().expect("failed to create  rtnetlink connection");
-        let join_handle = tokio::spawn(connection);
+async fn setup_veth_link(
+    veth_config: &VethConfig,
+) -> anyhow::Result<(Handle, JoinHandle<()>, VethLink, VethLink)> {
+    let (connection, link_handle, _) =
+        rtnetlink::new_connection().expect("failed to create  rtnetlink connection");
+    let join_handle = tokio::spawn(connection);
 
-        link_handle
-            .link()
-            .add()
-            .veth(veth_config.dev1_ifname.clone(), veth_config.dev2_ifname.clone())
-            .execute()
-            .await?;
+    link_handle
+        .link()
+        .add()
+        .veth(
+            veth_config.dev1_ifname.clone(),
+            veth_config.dev2_ifname.clone(),
+        )
+        .execute()
+        .await?;
 
-        let dev1_index = get_link_index(&link_handle, &veth_config.dev1_ifname).await.expect(
+    let dev1_index = get_link_index(&link_handle, &veth_config.dev1_ifname).await.expect(
             format!(
                 "Failed to retrieve index, this is not expected. Remove link manually: 'sudo ip link del {}'",
                 veth_config.dev1_ifname
             )
             .as_str(),
         );
-        let dev2_index = get_link_index(&link_handle, &veth_config.dev2_ifname).await?;
+    let dev2_index = get_link_index(&link_handle, &veth_config.dev2_ifname).await?;
 
-        set_link_up(&link_handle, dev1_index).await?;
-        set_link_up(&link_handle, dev2_index).await?;
+    set_link_up(&link_handle, dev1_index).await?;
+    set_link_up(&link_handle, dev2_index).await?;
 
+    let mac1 = match mac_address_by_name(&veth_config.dev1_ifname) {
+        Ok(Some(ma)) => ma.bytes(),
+        Ok(None) => {
+            anyhow::bail!("no mac addr for interface");
+        }
+        Err(e) => {
+            eprintln!("{:?}", e);
+            anyhow::bail!("error retrieving mac addr");
+        }
+    };
 
-        let mac1 = match mac_address_by_name(&veth_config.dev1_ifname) {
-            Ok(Some(ma)) => {
-                ma.bytes()
-            }
-            Ok(None) => {
-                anyhow::bail!("no mac addr for interface");
-            }
-            Err(e) => {
-                eprintln!("{:?}", e);
-                anyhow::bail!("error retrieving mac addr");
-            },
-        };
+    let mac2 = match mac_address_by_name(&veth_config.dev2_ifname) {
+        Ok(Some(ma)) => ma.bytes(),
+        Ok(None) => {
+            anyhow::bail!("no mac addr for interface");
+        }
+        Err(e) => {
+            eprintln!("{:?}", e);
+            anyhow::bail!("error retrieving mac addr");
+        }
+    };
 
-        let mac2 = match mac_address_by_name(&veth_config.dev2_ifname) {
-            Ok(Some(ma)) => {
-                ma.bytes()
-            }
-            Ok(None) => {
-                anyhow::bail!("no mac addr for interface");
-            }
-            Err(e) => {
-                eprintln!("{:?}", e);
-                anyhow::bail!("error retrieving mac addr");
-            },
-        };
+    let dev1 = VethLink {
+        ifname: veth_config.dev1_ifname.clone(),
+        index: dev1_index,
+        mac_addr: mac1,
+    };
 
-        let dev1 = VethLink {
-            ifname: veth_config.dev1_ifname.clone(),
-            index: dev1_index,
-            mac_addr: mac1,
-        };
+    let dev2 = VethLink {
+        ifname: veth_config.dev2_ifname.clone(),
+        index: dev2_index,
+        mac_addr: mac2,
+    };
 
-        let dev2 = VethLink {
-            ifname: veth_config.dev2_ifname.clone(),
-            index: dev2_index,
-            mac_addr: mac2,
-        };
-
-        Ok((link_handle, join_handle, dev1, dev2))
+    Ok((link_handle, join_handle, dev1, dev2))
 }
 
 pub fn add_veth_link(veth_config: &VethConfig) -> anyhow::Result<VethPair> {
     let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
 
-    let (link_handle, join_handle, dev1, dev2) = rt.block_on(async {
-        setup_veth_link(veth_config).await
-    })?;
+    let (link_handle, join_handle, dev1, dev2) =
+        rt.block_on(async { setup_veth_link(veth_config).await })?;
 
-    Ok(VethPair { link_handle, join_handle, rt, dev1, dev2})
+    Ok(VethPair {
+        link_handle,
+        join_handle,
+        rt,
+        dev1,
+        dev2,
+    })
 }
 
 #[cfg(test)]
